@@ -18,8 +18,28 @@ COPY vite.config.js postcss.config.js tailwind.config.js ./
 RUN npm run build
 
 # ---------- Stage 2: install PHP deps (tanpa dev) ----------
-FROM composer:${COMPOSER_VERSION}-php8.3 AS vendor
+# NOTE: image resmi composer tidak punya varian "-php8.3" (tag valid: 2, 2.10, latest, ...).
+# Pakai php:8.3-cli + binary composer agar platform check sesuai composer.json (php ^8.3).
+FROM composer:${COMPOSER_VERSION} AS composer
+FROM php:${PHP_VERSION}-cli-bookworm AS vendor
+COPY --from=composer /usr/bin/composer /usr/bin/composer
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_HOME=/tmp/composer \
+    COMPOSER_CACHE_DIR=/tmp/cache/composer
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git unzip \
+      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev zlib1g-dev \
+      libfreetype6-dev libjpeg62-turbo-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" \
+      mbstring exif pcntl bcmath gd zip intl opcache \
+    && apt-get purge -y --auto-remove \
+      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev \
+      libfreetype6-dev libjpeg62-turbo-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && mkdir -p /tmp/cache/composer
 COPY composer.json composer.lock ./
 RUN --mount=type=cache,target=/tmp/cache/composer \
     composer install \
