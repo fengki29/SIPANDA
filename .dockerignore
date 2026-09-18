@@ -15,6 +15,10 @@ storage/framework/sessions/*
 storage/framework/views/*
 storage/*.key
 storage/pail
+# Cache bootstrap lokal (packages.php/services.php) jangan masuk image:
+# artisan akan generate ulang saat build.
+bootstrap/cache/*
+!bootstrap/cache/.gitignore
 tests
 phpunit.xml
 .phpunit.cache

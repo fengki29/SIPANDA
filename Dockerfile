@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
-# SIPANDA — Laravel 13 + PHP 8.3 + Nginx + PHP-FPM, multi-stage (cepat & ramping).
+# SIPANDA — Laravel 13 + PHP 8.4 + Nginx + PHP-FPM, multi-stage (cepat & ramping).
 # Satu image berisi Nginx + PHP-FPM yang dijalankan via Supervisor.
 # Build  : docker compose build
 # Run    : docker compose --env-file .env.docker up -d --build
 
-ARG PHP_VERSION=8.3
+ARG PHP_VERSION=8.4
 ARG NODE_VERSION=20
 ARG COMPOSER_VERSION=2
 
@@ -18,8 +18,10 @@ COPY vite.config.js postcss.config.js tailwind.config.js ./
 RUN npm run build
 
 # ---------- Stage 2: install PHP deps (tanpa dev) ----------
-# NOTE: image resmi composer tidak punya varian "-php8.3" (tag valid: 2, 2.10, latest, ...).
-# Pakai php:8.3-cli + binary composer agar platform check sesuai composer.json (php ^8.3).
+# NOTE: image resmi composer tidak punya varian "-php8.4" (tag valid: 2, 2.10, latest, ...).
+# Pakai php:8.4-cli + binary composer agar platform check sesuai lock file
+# (Symfony 8.1 butuh PHP >= 8.4.1). JANGAN pakai --ignore-platform-reqs:
+# check ini yang menangkap ketidakcocokan versi PHP sejak awal.
 FROM composer:${COMPOSER_VERSION} AS composer
 FROM php:${PHP_VERSION}-cli-bookworm AS vendor
 COPY --from=composer /usr/bin/composer /usr/bin/composer
@@ -41,13 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && mkdir -p /tmp/cache/composer
 COPY composer.json composer.lock ./
-# NOTE: --ignore-platform-reqs aman di sini: stage ini hanya mengunduh kode
-# (--no-scripts). Cek ekstensi yang sebenarnya terjadi di stage runtime
-# saat artisan package:discover dijalankan (di situ semua ext sudah lengkap).
 RUN --mount=type=cache,target=/tmp/cache/composer \
     composer install \
       --no-dev --no-interaction --no-plugins --no-scripts \
-      --prefer-dist --optimize-autoloader --ignore-platform-reqs
+      --prefer-dist --optimize-autoloader
 
 # ---------- Stage 3: runtime Nginx + PHP-FPM ----------
 FROM php:${PHP_VERSION}-fpm-bookworm AS runtime
@@ -88,7 +87,9 @@ COPY --from=frontend /app/public/build ./public/build
 # Dummy key agar artisan bisa jalan saat build tanpa .env asli.
 ARG APP_KEY="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 ENV APP_KEY=${APP_KEY}
-RUN php artisan package:discover --ansi --no-interaction \
+# Hapus cache bootstrap basi dari konteks (kalau ada), lalu regenerate.
+RUN rm -f bootstrap/cache/*.php \
+ && php artisan package:discover --ansi --no-interaction \
  && php artisan view:clear --no-interaction \
  && chown -R www-data:www-data storage bootstrap/cache \
  && chmod -R 775 storage bootstrap/cache
