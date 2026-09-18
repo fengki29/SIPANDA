@@ -33,18 +33,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libfreetype6-dev libjpeg62-turbo-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
-      mbstring exif pcntl bcmath gd zip intl opcache \
+      pdo_mysql mbstring exif pcntl bcmath gd zip intl opcache \
     && apt-get purge -y --auto-remove \
-      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev \
+      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev zlib1g-dev \
       libfreetype6-dev libjpeg62-turbo-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && mkdir -p /tmp/cache/composer
 COPY composer.json composer.lock ./
+# NOTE: --ignore-platform-reqs aman di sini: stage ini hanya mengunduh kode
+# (--no-scripts). Cek ekstensi yang sebenarnya terjadi di stage runtime
+# saat artisan package:discover dijalankan (di situ semua ext sudah lengkap).
 RUN --mount=type=cache,target=/tmp/cache/composer \
     composer install \
       --no-dev --no-interaction --no-plugins --no-scripts \
-      --prefer-dist --optimize-autoloader
+      --prefer-dist --optimize-autoloader --ignore-platform-reqs
 
 # ---------- Stage 3: runtime Nginx + PHP-FPM ----------
 FROM php:${PHP_VERSION}-fpm-bookworm AS runtime
