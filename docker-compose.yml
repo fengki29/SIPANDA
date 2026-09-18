@@ -1,0 +1,58 @@
+# SIPANDA — compose lokal (app + MySQL 8.4).
+# 1) cp .env.docker.example .env.docker
+# 2) php artisan key:generate --show  -> isi APP_KEY di .env.docker
+# 3) docker compose --env-file .env.docker up -d --build
+# 4) buka http://localhost:8000/up  (health) dan http://localhost:8000/
+
+name: sipanda
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sipanda-app:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env.docker
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+    ports:
+      - "${APP_PORT:-8000}:80"
+    volumes:
+      # Persistensi storage Laravel (upload, dsb) tanpa menimpa kode.
+      - storage-data:/var/www/html/storage/app
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-sipanda}
+      MYSQL_USER: ${DB_USERNAME:-sipanda}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootsecret}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_ROOT_PASSWORD:-rootsecret}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  db-data:
+  storage-data:
