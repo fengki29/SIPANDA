@@ -29,6 +29,11 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_HOME=/tmp/composer \
     COMPOSER_CACHE_DIR=/tmp/cache/composer
 WORKDIR /app
+# SENGAJA tanpa "apt-get purge --auto-remove": pola itu menghapus runtime libs
+# (libpng, libjpeg, libzip, libicu, ...) sehingga gd.so/zip.so/intl.so gagal
+# load ("Unable to load dynamic library") dan composer menolak lock file.
+# Stage ini dibuang setelah build (hanya /app/vendor yang disalin), jadi
+# tidak perlu dirampingkan — yang penting ekstensi benar-benar load.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git unzip \
       libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev zlib1g-dev \
@@ -36,9 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
       pdo_mysql mbstring exif pcntl bcmath gd zip intl opcache \
-    && apt-get purge -y --auto-remove \
-      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev zlib1g-dev \
-      libfreetype6-dev libjpeg62-turbo-dev \
+    && php -m | grep -Ei '^(gd|zip|intl|pdo_mysql)$' \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && mkdir -p /tmp/cache/composer
@@ -55,18 +58,33 @@ ENV DEBIAN_FRONTEND=noninteractive \
     COMPOSER_ALLOW_SUPERUSER=1
 
 # Nginx + Supervisor + ekstensi PHP untuk Laravel + maatwebsite/excel + dompdf.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Pola apt-mark: hanya paket -dev yang dibuang; runtime libs hasil kompilasi
+# (libpng, libjpeg, libzip, libicu, ...) ditandai manual agar tidak ikut
+# ter-autoremove (kalau ikut terhapus, gd.so/zip.so/intl.so gagal load).
+RUN set -eux; \
+    savedAptMark="$(apt-mark showmanual)"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
       curl nginx supervisor \
       libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev \
       libfreetype6-dev libjpeg62-turbo-dev \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" \
-      pdo_mysql mbstring exif pcntl bcmath gd zip intl opcache \
-    && apt-get purge -y --auto-remove \
-      libpng-dev libonig-dev libxml2-dev libzip-dev libicu-dev \
-      libfreetype6-dev libjpeg62-turbo-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    ; \
+    docker-php-ext-configure gd --with-freetype --with-jpeg; \
+    docker-php-ext-install -j"$(nproc)" \
+      pdo_mysql mbstring exif pcntl bcmath gd zip intl opcache; \
+    php -m | grep -Ei '^(gd|zip|intl|pdo_mysql)$'; \
+    apt-mark auto '.*' > /dev/null; \
+    apt-mark manual $savedAptMark curl nginx supervisor; \
+    find /usr/local -type f -executable -exec ldd '{}' ';' \
+      | awk '/=>/ { so = $(NF-1); if (index(so, "/usr/local/") == 1) { next }; gsub("^/(usr/)?", "", so); print "so:" so }' \
+      | sort -u \
+      | xargs -r dpkg-query --search \
+      | cut -d: -f1 \
+      | sort -u \
+      | xargs -r apt-mark manual; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # php.ini produksi + OPcache.
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
